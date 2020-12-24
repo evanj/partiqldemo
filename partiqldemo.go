@@ -18,6 +18,106 @@ const envFormID = "env"
 const queryFormID = "query"
 const mainClass = "org.partiql.cli.Main"
 
+func writeTemp(data string) (*os.File, error) {
+	tempFile, err := ioutil.TempFile("", "")
+	if err != nil {
+		return nil, err
+	}
+	_, err = tempFile.Write([]byte(data))
+	if err != nil {
+		os.Remove(tempFile.Name())
+		return nil, err
+	}
+	err = tempFile.Close()
+	if err != nil {
+		os.Remove(tempFile.Name())
+		return nil, err
+	}
+
+	return tempFile, nil
+}
+
+type queryExecError struct {
+	output []byte
+	err    error
+}
+
+func (q *queryExecError) Error() string {
+	return fmt.Sprintf("query exec: %s; original err %s", string(q.output), q.err.Error())
+}
+
+func (q *queryExecError) Unwrap() error {
+	return q.err
+}
+
+// executeOriginalCLI executes the upstream org.partiql.cli.Main class. Use this function
+// to use the unmodified upstream distribution. As of the most recent release, its output
+// format is not quite as nice.
+func executeOriginalCLI(classpath string, query string, environment string) (string, error) {
+	// write the environment data to a temporary file
+	tempFile, err := writeTemp(environment)
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(tempFile.Name())
+
+	// execute the original CLI
+	var args []string
+	if classpath != "" {
+		args = append(args, "-classpath", classpath)
+	}
+	args = append(args, mainClass, "--environment", tempFile.Name(), "--output-format", "PARTIQL",
+		"--query", query)
+	cmd := exec.Command("java", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", &queryExecError{out, err}
+	}
+
+	return string(out), nil
+}
+
+func executeNewCLI(jar string, query string, environment string) (string, error) {
+	// write the environment data to a temporary file
+	tempFile, err := writeTemp(environment)
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(tempFile.Name())
+
+	// execute the new CLI
+	cmd := exec.Command("java", "-jar", jar, tempFile.Name())
+
+	// write the query on stdin in a separate goroutine
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return "", err
+	}
+	writeErr := make(chan error, 1)
+	go func() {
+		_, err := stdin.Write([]byte(query))
+		err2 := stdin.Close()
+		if err != nil {
+			writeErr <- err
+		}
+		writeErr <- err2
+	}()
+
+	// get the result and any execution error
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", &queryExecError{out, err}
+	}
+
+	// check that we wrote to stdin okay
+	err = <-writeErr
+	if err != nil {
+		return "", err
+	}
+
+	return string(out), nil
+}
+
 func (s *server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	log.Printf("handleRoot %s %s", r.Method, r.URL.String())
 	if r.URL.Path != "/" {
@@ -51,6 +151,7 @@ func (s *server) handleExecute(w http.ResponseWriter, r *http.Request) {
 
 type server struct {
 	classpath string
+	jarPath   string
 }
 
 func (s *server) handleExecuteErr(w http.ResponseWriter, r *http.Request) error {
@@ -69,36 +170,18 @@ func (s *server) handleExecuteErr(w http.ResponseWriter, r *http.Request) error 
 }
 
 func (s *server) executeAndRender(w http.ResponseWriter, query string, envData string) error {
-	// write the environment data to a temporary file
-	tempFile, err := ioutil.TempFile("", "")
-	if err != nil {
-		return err
+	var result string
+	var err error
+	if s.jarPath != "" {
+		result, err = executeNewCLI(s.jarPath, query, envData)
+	} else {
+		result, err = executeOriginalCLI(s.classpath, query, envData)
 	}
-	defer os.Remove(tempFile.Name())
-	_, err = tempFile.Write([]byte(envData))
-	if err != nil {
-		return err
-	}
-	err = tempFile.Close()
 	if err != nil {
 		return err
 	}
 
-	var args []string
-	if s.classpath != "" {
-		args = append(args, "-classpath", s.classpath)
-	}
-	args = append(args, mainClass, "--environment", tempFile.Name(), "--output-format", "PARTIQL", "--output", "/dev/stdout", "--query", query)
-	fmt.Println(args)
-	cmd := exec.Command("java", args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		errBytes := append([]byte(err.Error()), ':', ' ')
-		out = append(errBytes, out...)
-	}
-	fmt.Printf("WTF??\n\n%#v\n\n", string(out))
-
-	values := &rootTemplateValues{query, envData, string(out)}
+	values := &rootTemplateValues{query, envData, result}
 	return rootTemplate.Execute(w, values)
 }
 
@@ -116,7 +199,8 @@ func (s *server) serveHTTP(addr string) error {
 }
 
 func main() {
-	classPath := flag.String("classpath", "", "the -classpath argument for java")
+	classpath := flag.String("classpath", "", "-classpath argument for the original CLI")
+	jarPath := flag.String("jar", "", "path to jar for the new CLI")
 	addr := flag.String("addr", "", "If set, address for HTTP requests.")
 	flag.Parse()
 
@@ -126,7 +210,7 @@ func main() {
 		*addr = ":" + defaultPort
 	}
 
-	s := &server{*classPath}
+	s := &server{*classpath, *jarPath}
 	err := s.serveHTTP(*addr)
 	if err != nil {
 		panic(err)
