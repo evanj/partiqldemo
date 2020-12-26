@@ -229,21 +229,27 @@ type rootTemplateValues struct {
 
 var rootTemplate = template.Must(template.New("root").Parse(`<!doctype html>
 <html>
-<head><title>PartiQL Explorer</title></head>
+<head><title>PartiQL Explorer</title>
+<style>
+textarea {
+	white-space: pre;
+}
+</style>
+</head>
 <body>
 <h1>PartiQL Explorer</h1>
-<p>Execute PartiQL queries using the CLI tool.</p>
+<p>Execute <a href="https://partiql.org/">PartiQL</a> queries. See the <a href="https://partiql.org/tutorial.html">tutorial</a> for example queries.</p>
 
 <form method="post" action="` + executePath + `">
 <h2>Query</h2>
-<textarea name="` + queryFormID + `" rows="10" cols="120" wrap="off" autofocus>{{.Query}}</textarea>
+<textarea name="` + queryFormID + `" rows="10" cols="120" autofocus>{{.Query}}</textarea>
 <p><input type="submit" value="Execute"></p>
 
 <h2>Results</h2>
 <pre>{{.Results}}</pre>
 
 <h2>Data</h2>
-<textarea name="` + envFormID + `" rows="10" cols="120" wrap="off" autofocus>{{.Data}}</textarea>
+<textarea name="` + envFormID + `" rows="10" cols="120">{{.Data}}</textarea>
 </form>
 </body>
 </html>
