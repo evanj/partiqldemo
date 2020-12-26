@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"time"
 )
 
 const portEnvVar = "PORT"
@@ -104,10 +105,13 @@ func executeNewCLI(jar string, query string, environment string) (string, error)
 	}()
 
 	// get the result and any execution error
+	start := time.Now()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", &queryExecError{out, err}
 	}
+	end := time.Now()
+	log.Printf("executed jar in %s", end.Sub(start).String())
 
 	// check that we wrote to stdin okay
 	err = <-writeErr

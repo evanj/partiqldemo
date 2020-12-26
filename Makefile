@@ -10,14 +10,21 @@ JAVA_SRC_FILES:=$(shell find $(JAVA_SRC_DIR) -type f -name '*.java')
 JAVA_BUILD_DIR:=$(BUILD_DIR)/$(JAVA_SRC_DIR)
 JAVA_BUILD_STAMP:=$(JAVA_BUILD_DIR)/.stamp
 
-
-all: $(OUTPUT_JAR)
+all: build_binaries check
+build_binaries: $(OUTPUT_JAR) $(BUILD_DIR)/partiqldemo
+check:
 	goimports -l -w .
 	go test -race ./...
 	go vet ./...
 	golint ./...
 	staticcheck ./...
 	go mod tidy
+
+$(BUILD_DIR)/partiqldemo:
+	go build -o $@ partiqldemo.go
+
+docker: $(OUTPUT_JAR)
+	docker build . --tag=gcr.io/gosignin-demo/partiqldemo:$(shell date +%Y%m%d)-$(shell git rev-parse --short=10 HEAD)
 
 $(PARTIQL_JAR): buildtools/makepartiqljar.go | $(BUILD_DIR)
 	go run $< --version=$(PARTIQL_VERSION) --outputPath=$@
@@ -29,11 +36,7 @@ $(OUTPUT_JAR): $(PARTIQL_JAR) $(JAVA_BUILD_STAMP)
 	mv $(JAVA_BUILD_DIR)/buildtemp.jar $@
 
 $(JAVA_BUILD_STAMP): $(JAVA_SRC_FILES) $(PARTIQL_JAR) | $(BUILD_DIR)
-	echo "WTF $@"
 	mkdir -p $(dir $@)
-	echo "WTF files $(JAVA_SRC_FILES)" $(JAVA_SRC_FILES)
-	echo "WTFX find $(JAVA_SRC_DIR) -type f -name '*.flac'"
-	#JAVA_SRC_FILES:=$(shell find $(JAVA_SRC_DIR) -type f -name '*.flac')
 	javac -Xlint:all -cp $(PARTIQL_JAR) \
 		--source-path $(JAVA_SRC_DIR) \
 		-d $(JAVA_BUILD_DIR) \
