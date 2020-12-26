@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"html/template"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -105,13 +107,10 @@ func executeNewCLI(jar string, query string, environment string) (string, error)
 	}()
 
 	// get the result and any execution error
-	start := time.Now()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", &queryExecError{out, err}
 	}
-	end := time.Now()
-	log.Printf("executed jar in %s", end.Sub(start).String())
 
 	// check that we wrote to stdin okay
 	err = <-writeErr
@@ -120,6 +119,81 @@ func executeNewCLI(jar string, query string, environment string) (string, error)
 	}
 
 	return string(out), nil
+}
+
+type javaServerConnection struct {
+	process     *exec.Cmd
+	fromProcess io.ReadCloser
+	toProcess   io.WriteCloser
+}
+
+func newJavaServerConnection(jarPath string) (*javaServerConnection, error) {
+	process := exec.Command("java", "-jar", jarPath, "--server")
+	process.Stderr = os.Stderr
+	stdin, err := process.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	stdout, err := process.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+
+	err = process.Start()
+	if err != nil {
+		stdin.Close()
+		stdout.Close()
+		return nil, err
+	}
+	return &javaServerConnection{process, stdout, stdin}, nil
+}
+
+func (j *javaServerConnection) close() error {
+	err := j.toProcess.Close()
+	err2 := j.fromProcess.Close()
+	err3 := j.process.Wait()
+	if err != nil {
+		return err
+	}
+	if err2 != nil {
+		return err2
+	}
+	return err3
+}
+
+func (j *javaServerConnection) execute(query string, environment string) (string, error) {
+	// write the length header, then the query/environment bytes
+	const int32Len = 4
+	header := make([]byte, int32Len*2)
+	binary.LittleEndian.PutUint32(header, uint32(len(query)))
+	binary.LittleEndian.PutUint32(header[int32Len:], uint32(len(environment)))
+	_, err := j.toProcess.Write(header)
+	if err != nil {
+		return "", err
+	}
+
+	_, err = j.toProcess.Write([]byte(query))
+	if err != nil {
+		return "", err
+	}
+	_, err = j.toProcess.Write([]byte(environment))
+	if err != nil {
+		return "", err
+	}
+
+	// read the response length
+	_, err = io.ReadFull(j.fromProcess, header[:int32Len])
+	if err != nil {
+		return "", err
+	}
+	respLen := binary.LittleEndian.Uint32(header[:int32Len])
+	log.Printf("reading response len=%d", respLen)
+	respBytes := make([]byte, respLen)
+	_, err = io.ReadFull(j.fromProcess, respBytes)
+	if err != nil {
+		return "", err
+	}
+	return string(respBytes), nil
 }
 
 func (s *server) handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -154,8 +228,9 @@ func (s *server) handleExecute(w http.ResponseWriter, r *http.Request) {
 }
 
 type server struct {
-	classpath string
-	jarPath   string
+	classpath  string
+	jarPath    string
+	connection *javaServerConnection
 }
 
 func (s *server) handleExecuteErr(w http.ResponseWriter, r *http.Request) error {
@@ -174,9 +249,23 @@ func (s *server) handleExecuteErr(w http.ResponseWriter, r *http.Request) error 
 }
 
 func (s *server) executeAndRender(w http.ResponseWriter, query string, envData string) error {
+	start := time.Now()
 	var result string
 	var err error
-	if s.jarPath != "" {
+	if s.connection != nil {
+		result, err = s.connection.execute(query, envData)
+		if err != nil {
+			// reset the connection
+			closeErr := s.connection.close()
+			if closeErr != nil {
+				log.Printf("warning: error closing server: %s", closeErr.Error())
+			}
+			s.connection, closeErr = newJavaServerConnection(s.jarPath)
+			if closeErr != nil {
+				log.Printf("warning: error starting server: %s", closeErr.Error())
+			}
+		}
+	} else if s.jarPath != "" {
 		result, err = executeNewCLI(s.jarPath, query, envData)
 	} else {
 		result, err = executeOriginalCLI(s.classpath, query, envData)
@@ -184,6 +273,8 @@ func (s *server) executeAndRender(w http.ResponseWriter, query string, envData s
 	if err != nil {
 		return err
 	}
+	end := time.Now()
+	log.Printf("executed query in %s", end.Sub(start).String())
 
 	values := &rootTemplateValues{query, envData, result}
 	return rootTemplate.Execute(w, values)
@@ -206,6 +297,7 @@ func main() {
 	classpath := flag.String("classpath", "", "-classpath argument for the original CLI")
 	jarPath := flag.String("jar", "", "path to jar for the new CLI")
 	addr := flag.String("addr", "", "If set, address for HTTP requests.")
+	noServer := flag.Bool("noServer", false, "Do not use the JAR server mode.")
 	flag.Parse()
 
 	if *addr == "" && os.Getenv(portEnvVar) != "" {
@@ -214,8 +306,17 @@ func main() {
 		*addr = ":" + defaultPort
 	}
 
-	s := &server{*classpath, *jarPath}
-	err := s.serveHTTP(*addr)
+	var connection *javaServerConnection
+	var err error
+	if *jarPath != "" && !*noServer {
+		connection, err = newJavaServerConnection(*jarPath)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	s := &server{*classpath, *jarPath, connection}
+	err = s.serveHTTP(*addr)
 	if err != nil {
 		panic(err)
 	}
