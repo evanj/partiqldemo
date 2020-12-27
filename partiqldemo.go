@@ -330,7 +330,7 @@ type rootTemplateValues struct {
 
 var rootTemplate = template.Must(template.New("root").Parse(`<!doctype html>
 <html>
-<head><title>PartiQL Explorer</title>
+<head><title>PartiQL Demo</title>
 <style>
 textarea {
 	white-space: pre;
@@ -338,8 +338,10 @@ textarea {
 </style>
 </head>
 <body>
-<h1>PartiQL Explorer</h1>
-<p>Execute <a href="https://partiql.org/">PartiQL</a> queries. See the <a href="https://partiql.org/tutorial.html">tutorial</a> for example queries.</p>
+<h1>PartiQL Demo</h1>
+<p>The web tool executes <a href="https://partiql.org/">PartiQL</a> queries. PartiQL is a SQL-92 compatible extension that supports queries on arbitrary JSON documents. It was created by Amazon and is used by <a href="https://docs.aws.amazon.com/qldb/latest/developerguide/ql-reference.html">AWS QLDB</a> and <a href="https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/ql-reference.html">AWS DynamoDB</a>. It was based on <a href="http://db.ucsd.edu/People/yannis.htm">Yannis Papakonstantinou</a>'s <a href="https://community.partiql.org/t/comparison-with-sql/42">SQL++</a> research project.
+
+See the <a href="https://partiql.org/tutorial.html">tutorial</a> for example queries. The <a href="https://github.com/evanj/partiqldemo">source code of this web interface is available</a>.</p>
 
 <form method="post" action="` + executePath + `">
 <h2>Query</h2>
