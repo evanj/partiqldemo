@@ -49,21 +49,22 @@ public class ExecuteQuery {
         final CompilerPipeline compilerPipeline = CompilerPipeline.standard(ion);
         final EvaluationSession initSession = EvaluationSession.standard();
 
-        ExprValue queryResult = null;
+
+        final StringBuilder output = new StringBuilder();
         try {
             final ExprValue envEvaluated = compilerPipeline.compile(environment).eval(initSession);
-
             final EvaluationSession envSession = EvaluationSession.builder()
                 .globals(envEvaluated.getBindings())
                 .build();
-            queryResult = compilerPipeline.compile(query).eval(envSession);
+            final ExprValue queryResult = compilerPipeline.compile(query).eval(envSession);
+
+            // formatting can throw evaluation exceptions because this implementation
+            // evaluates expressions lazily
+            ConfigurableExprValueFormatter.getPretty().formatTo(queryResult, output);
         } catch (SqlException e) {
             return "Execution error: " + e.toString();
         }
 
-        // pretty print the result
-        final StringBuilder output = new StringBuilder();
-        ConfigurableExprValueFormatter.getPretty().formatTo(queryResult, output);
         return output.toString();
     }
 
