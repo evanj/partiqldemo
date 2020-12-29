@@ -1,6 +1,6 @@
 # PartiQL Demo
 
-This is a Go web server that wraps the (PartiQL)[https://partiql.org/] command line tools in a web
+This is a Go web server that wraps the [PartiQL](https://partiql.org/) command line tools in a web
 interface, to make it easier to use.
 
 
@@ -15,7 +15,7 @@ interface, to make it easier to use.
 
 The command line tool reads the "environment" a file, then reads the query from standard input. It then executes the query and prints the output on standard output.
 
-This unfortunately requires starting the JVM then tearing it down. To make the web interface work better, it also supports a server mode. It reads input from standard input using the following protocol:
+This unfortunately requires starting the JVM then tearing it down. To make the web interface work with lower latency, it also supports a server mode. It reads input from standard input using the following protocol:
 
 * 4 bytes little endian: length of query
 * 4 bytes little endian: length of environment
