@@ -1,7 +1,7 @@
 # PartiQL Demo
 
 This is a Go web server that wraps the [PartiQL](https://partiql.org/) command line tools in a web
-interface, to make it easier to use.
+interface, to make it easier to use. [Try it with a version running on Google Cloud Run](https://partiqldemo.evanjones.ca/).
 
 
 ## Usage
